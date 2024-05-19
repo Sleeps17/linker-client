@@ -1,0 +1,7 @@
+version: '3'
+
+tasks:
+  install:
+    cmds:
+      - go build -o linker ./cmd/client/main.go
+      - ln -s linker /usr/local/bin/linker
