@@ -1,20 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"github.com/Sleeps17/linker-client/internal/models"
 	"github.com/fatih/color"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/olekukonko/tablewriter"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
 	"time"
-
-	linkerV2 "github.com/Sleeps17/linker-protos/gen/go/linker"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -25,6 +25,7 @@ const (
 	methodPickLink    = "pick_link"
 	methodListLinks   = "list_links"
 	methodDeleteLink  = "delete_links"
+	methodHelp        = "help"
 
 	argTopic = "topic"
 	argLink  = "link"
@@ -42,11 +43,61 @@ var (
 		methodPickLink,
 		methodListLinks,
 		methodDeleteLink,
+		methodHelp,
 	}
 
-	serverAddress = "localhost:4404"
-	serverTimeout = 5 * time.Second
+	serverAddress = "linker-sleeps17.amvera.io"
+	serverTimeout = 30 * time.Second
 )
+
+type MethodInfo struct {
+	Name         string
+	Description  string
+	RequiredArgs []string
+	OptionalArgs []string
+}
+
+var Help = []MethodInfo{
+	{
+		Name:         methodPostTopic,
+		Description:  "Создает новый топик",
+		RequiredArgs: []string{"topic"},
+		OptionalArgs: []string{},
+	},
+	{
+		Name:         methodListTopics,
+		Description:  "Выводит список топиков",
+		RequiredArgs: []string{},
+		OptionalArgs: []string{},
+	},
+	{
+		Name:         methodDeleteTopic,
+		Description:  "Удаляет топик",
+		RequiredArgs: []string{"topic"},
+		OptionalArgs: []string{},
+	},
+	{
+		Name:         methodPostLink,
+		Description:  "Создает новую ссылку в топике",
+		RequiredArgs: []string{"topic", "link"},
+		OptionalArgs: []string{"alias"},
+	},
+	{
+		Name:         methodPickLink,
+		Description:  "Выводит ссылку из топика по алиасу",
+		RequiredArgs: []string{"topic", "alias"},
+	},
+	{
+		Name:         methodListLinks,
+		Description:  "Выводит список ссылок из топика",
+		RequiredArgs: []string{"topic"},
+	},
+	{
+		Name:         methodDeleteLink,
+		Description:  "Удаляет ссылку из топика",
+		RequiredArgs: []string{"topic", "alias"},
+	},
+}
 
 var (
 	red    = color.New(color.FgRed).SprintFunc()
@@ -93,7 +144,7 @@ func ParseArg(arg string) string {
 	return ""
 }
 
-func PrintResponseForPostTopic(resp *linkerV2.PostTopicResponse, err error) {
+func PrintResponseForPostTopic(resp models.PostTopicResponse, err error) {
 	var output string
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
@@ -102,12 +153,12 @@ func PrintResponseForPostTopic(resp *linkerV2.PostTopicResponse, err error) {
 			output = red(fmt.Sprintf("Произошла ошибка при выполнении запроса: %s\n", st.Message()))
 		}
 	} else {
-		output = green(fmt.Sprintf("Запрос успешно выполнен, TopicId = %d\n", resp.TopicId))
+		output = green(fmt.Sprintf("Запрос успешно выполнен, TopicId = %d\n", resp.TopicID))
 	}
 	fmt.Println(output)
 }
 
-func PrintResponseForDeleteTopic(resp *linkerV2.DeleteTopicResponse, err error) {
+func PrintResponseForDeleteTopic(resp models.DeleteTopicResponse, err error) {
 	var output string
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
@@ -116,12 +167,12 @@ func PrintResponseForDeleteTopic(resp *linkerV2.DeleteTopicResponse, err error) 
 			output = red(fmt.Sprintf("Произошла ошибка при выполнении запроса: %s\n", st.Message()))
 		}
 	} else {
-		output = green(fmt.Sprintf("Запрос успешно выполнен, TopicId = %d\n", resp.TopicId))
+		output = green(fmt.Sprintf("Запрос успешно выполнен, TopicId = %d\n", resp.TopicID))
 	}
 	fmt.Println(output)
 }
 
-func PrintResponseForListTopics(resp *linkerV2.ListTopicsResponse, err error) {
+func PrintResponseForListTopics(resp models.ListTopicsResponse, err error) {
 	var output string
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
@@ -142,7 +193,7 @@ func PrintResponseForListTopics(resp *linkerV2.ListTopicsResponse, err error) {
 	table.Render()
 }
 
-func PrintResponseForPostLink(resp *linkerV2.PostLinkResponse, err error) {
+func PrintResponseForPostLink(resp models.PostLinkResponse, err error) {
 	var output string
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
@@ -157,7 +208,7 @@ func PrintResponseForPostLink(resp *linkerV2.PostLinkResponse, err error) {
 	fmt.Println(output)
 }
 
-func PrintResponseForPickLink(resp *linkerV2.PickLinkResponse, err error) {
+func PrintResponseForPickLink(resp models.PickLinkResponse, err error) {
 	var output string
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
@@ -171,7 +222,7 @@ func PrintResponseForPickLink(resp *linkerV2.PickLinkResponse, err error) {
 	fmt.Println(output)
 }
 
-func PrintResponseForDeleteLink(resp *linkerV2.DeleteLinkResponse, err error) {
+func PrintResponseForDeleteLink(resp models.DeleteLinkResponse, err error) {
 	var output string
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
@@ -185,7 +236,7 @@ func PrintResponseForDeleteLink(resp *linkerV2.DeleteLinkResponse, err error) {
 	fmt.Println(output)
 }
 
-func PrintResponseForListLinks(topic string, resp *linkerV2.ListLinksResponse, err error) {
+func PrintResponseForListLinks(topic string, resp models.ListLinksResponse, err error) {
 	var output string
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
@@ -209,6 +260,53 @@ func PrintResponseForListLinks(topic string, resp *linkerV2.ListLinksResponse, e
 	table.Render()
 }
 
+func PrintResponseForHelp() {
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Id", "Name", "Description", "Required_Args", "Option_Args"})
+
+	for i := range Help {
+		table.Append([]string{
+			green(fmt.Sprint(i + 1)),
+			green(Help[i].Name),
+			green(Help[i].Description),
+			green(Help[i].RequiredArgs),
+			green(Help[i].OptionalArgs),
+		})
+	}
+
+	table.Render()
+}
+
+func SendRequest[T, U any](ctx context.Context, request T, method string, path string) (int, U) {
+	data, err := jsoniter.Marshal(request)
+	if err != nil {
+		fmt.Println(red("Ошибка при парсинге json"))
+		os.Exit(1)
+	}
+
+	req, err := http.NewRequest(method, fmt.Sprintf("http://%s/%s", serverAddress, path), bytes.NewBuffer(data))
+	if err != nil {
+		fmt.Println(red("Ошибка при создании запроса"))
+		os.Exit(1)
+	}
+
+	req = req.WithContext(ctx)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Println(red("Ошибка при выполнении запроса"))
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	var response U
+	if err := jsoniter.NewDecoder(resp.Body).Decode(&response); err != nil {
+		fmt.Println(red("Ошибка при парсинге json"))
+		os.Exit(1)
+	}
+
+	return resp.StatusCode, response
+}
 func main() {
 	username := MustCreateUsername()
 
@@ -220,22 +318,16 @@ func main() {
 	method := os.Args[1]
 
 	if !slices.Contains(availableMethods, method) {
-		fmt.Println(fmt.Sprintf(red("Метод %s не поддерживается\n", method)))
+		fmt.Println(red(fmt.Sprintf("Метод %s не поддерживается", method)))
 		os.Exit(1)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), serverTimeout)
 	defer cancel()
 
-	dial, err := grpc.DialContext(ctx, serverAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		fmt.Println(red("Что-то пошло не так"))
-		os.Exit(1)
-	}
-
-	client := linkerV2.NewLinkerClient(dial)
-
 	switch method {
+	case methodHelp:
+		PrintResponseForHelp()
 	case methodPostTopic:
 		if !RequireContains(argTopic) {
 			fmt.Println(red("Для выполнения метода post вы должны указать флаг topic"))
@@ -248,13 +340,17 @@ func main() {
 			os.Exit(1)
 		}
 
-		request := &linkerV2.PostTopicRequest{
+		request := models.PostTopicRequest{
 			Username: username,
 			Topic:    topic,
 		}
 
-		resp, err := client.PostTopic(ctx, request)
-		PrintResponseForPostTopic(resp, err)
+		_, resp := SendRequest[models.PostTopicRequest, models.PostTopicResponse](
+			ctx, request,
+			http.MethodPost, "topics",
+		)
+
+		PrintResponseForPostTopic(resp, nil)
 	case methodDeleteTopic:
 		if !RequireContains(argTopic) {
 			fmt.Println(red("Для выполнения метода delete вы должны указать флаг topic"))
@@ -267,20 +363,28 @@ func main() {
 			os.Exit(1)
 		}
 
-		request := &linkerV2.DeleteTopicRequest{
+		request := models.DeleteTopicRequest{
 			Username: username,
 			Topic:    topic,
 		}
 
-		resp, err := client.DeleteTopic(ctx, request)
-		PrintResponseForDeleteTopic(resp, err)
+		_, resp := SendRequest[models.DeleteTopicRequest, models.DeleteTopicResponse](
+			ctx, request,
+			http.MethodDelete, "topics",
+		)
+
+		PrintResponseForDeleteTopic(resp, nil)
 	case methodListTopics:
-		request := &linkerV2.ListTopicsRequest{
+		request := models.ListTopicsRequest{
 			Username: username,
 		}
 
-		resp, err := client.ListTopics(ctx, request)
-		PrintResponseForListTopics(resp, err)
+		_, resp := SendRequest[models.ListTopicsRequest, models.ListTopicsResponse](
+			ctx, request,
+			http.MethodGet, "topics",
+		)
+
+		PrintResponseForListTopics(resp, nil)
 	case methodPostLink:
 		if !RequireContains(argTopic, argLink) {
 			fmt.Println(red("Для выполнения метода post вы должны указать флаг link"))
@@ -301,15 +405,19 @@ func main() {
 
 		alias := ParseArg(argAlias)
 
-		request := &linkerV2.PostLinkRequest{
+		request := models.PostLinkRequest{
 			Username: username,
 			Topic:    topic,
 			Link:     link,
 			Alias:    alias,
 		}
 
-		resp, err := client.PostLink(ctx, request)
-		PrintResponseForPostLink(resp, err)
+		_, resp := SendRequest[models.PostLinkRequest, models.PostLinkResponse](
+			ctx, request,
+			http.MethodPost, "links",
+		)
+
+		PrintResponseForPostLink(resp, nil)
 	case methodPickLink:
 		if !RequireContains(argTopic, argAlias) {
 			fmt.Println(red("Для выполнения метода pick вы должны указать флаг alias"))
@@ -328,14 +436,18 @@ func main() {
 			os.Exit(1)
 		}
 
-		request := &linkerV2.PickLinkRequest{
+		request := models.PickLinkRequest{
 			Username: username,
 			Topic:    topic,
 			Alias:    alias,
 		}
 
-		resp, err := client.PickLink(ctx, request)
-		PrintResponseForPickLink(resp, err)
+		_, resp := SendRequest[models.PickLinkRequest, models.PickLinkResponse](
+			ctx, request,
+			http.MethodGet, "links",
+		)
+
+		PrintResponseForPickLink(resp, nil)
 	case methodListLinks:
 		if !RequireContains(argTopic) {
 			fmt.Println(red("Для выполнения метода list вы должны указать флаг topic"))
@@ -348,13 +460,17 @@ func main() {
 			os.Exit(1)
 		}
 
-		request := &linkerV2.ListLinksRequest{
+		request := models.ListLinksRequest{
 			Username: username,
 			Topic:    topic,
 		}
 
-		resp, err := client.ListLinks(ctx, request)
-		PrintResponseForListLinks(topic, resp, err)
+		_, resp := SendRequest[models.ListLinksRequest, models.ListLinksResponse](
+			ctx, request,
+			http.MethodGet, "links/list",
+		)
+
+		PrintResponseForListLinks(topic, resp, nil)
 	case methodDeleteLink:
 		if !RequireContains(argTopic, argAlias) {
 			fmt.Println(red("Для выполнения метода delete вы должны указать флаг alias"))
@@ -373,13 +489,17 @@ func main() {
 			os.Exit(1)
 		}
 
-		request := &linkerV2.DeleteLinkRequest{
+		request := models.DeleteLinkRequest{
 			Username: username,
 			Topic:    topic,
 			Alias:    alias,
 		}
 
-		resp, err := client.DeleteLink(ctx, request)
-		PrintResponseForDeleteLink(resp, err)
+		_, resp := SendRequest[models.DeleteLinkRequest, models.DeleteLinkResponse](
+			ctx, request,
+			http.MethodDelete, "links",
+		)
+
+		PrintResponseForDeleteLink(resp, nil)
 	}
 }
