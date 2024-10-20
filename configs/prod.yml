@@ -1,0 +1,12 @@
+available_methods:
+  - "post_topic"
+  - "delete_topic"
+  - "list_topics"
+  - "post_link"
+  - "pick_link"
+  - "list_links"
+  - "delete_links"
+  - "help"
+client:
+  base_path: "http://linker-sleeps17.amvera.io/"
+  timeout: 30s
